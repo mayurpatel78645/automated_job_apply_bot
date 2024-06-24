@@ -32,20 +32,24 @@ class LinkedInJobApplier:
             pass
 
     def process_text_input(self, input_id):
-        self._process_input(input_id, "5")
-
-    def process_text_area(self, input_id):
-        self._process_input(input_id, "5 years")
-
-    def _process_input(self, input_id, text):
         try:
             input_field = self.driver.find_element(By.ID, input_id)
-            if input_field.is_enabled():
+            if input_field.tag_name == "input" and input_field.get_attribute("type") == "text" and input_field.is_enabled():
                 input_field.clear()
-                input_field.send_keys(text)
-                print(f"Set input for {input_id}")
+                input_field.send_keys("5")
+                print(f"Set text input for {input_id}")
         except Exception as e:
-            print(f"Failed to process input for {input_id}: {e}")
+            print(f"Failed to process text input for {input_id}: {e}")
+
+    def process_text_area(self, input_id):
+        try:
+            input_field = self.driver.find_element(By.ID, input_id)
+            if input_field.tag_name == "textarea" and input_field.is_enabled():
+                input_field.clear()
+                input_field.send_keys("5 years")
+                print(f"Set text area for {input_id}")
+        except Exception as e:
+            print(f"Failed to process text area for {input_id}: {e}")
 
     def process_dropdowns(self):
         try:
@@ -54,21 +58,22 @@ class LinkedInJobApplier:
                 select = Select(dropdown)
                 options = select.options
                 if options:
-                    option_to_select = self._get_dropdown_option(options)
-                    if option_to_select:
+                    if any('yes' in option.text.lower() for option in options) and any('no' in option.text.lower() for option in options):
+                        for option in options:
+                            if 'yes' in option.text.lower():
+                                self.driver.execute_script("arguments[0].scrollIntoView(true);", dropdown)
+                                if dropdown.is_enabled():
+                                    select.select_by_visible_text(option.text)
+                                    print("Selected 'Yes' in dropdown")
+                                    break
+                    else:
+                        last_option = options[-1]
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", dropdown)
                         if dropdown.is_enabled():
-                            select.select_by_visible_text(option_to_select.text)
-                            print(f"Selected option '{option_to_select.text}' in dropdown")
+                            select.select_by_visible_text(last_option.text)
+                            print("Selected last option in dropdown")
         except Exception as e:
             print(f"Failed to process dropdown: {e}")
-
-    def _get_dropdown_option(self, options):
-        if any('yes' in option.text.lower() for option in options) and any('no' in option.text.lower() for option in options):
-            for option in options:
-                if 'yes' in option.text.lower():
-                    return option
-        return options[-1]  # Select last option by default
 
     def process_radio_buttons(self):
         try:
@@ -76,23 +81,21 @@ class LinkedInJobApplier:
             for fieldset in fieldsets:
                 legend_text = fieldset.find_element(By.TAG_NAME, 'legend').text
                 print(f"Processing fieldset with legend: {legend_text}")
-                self._select_radio_button(fieldset, legend_text)
+
+                options = fieldset.find_elements(By.XPATH, './/input[@type="radio"]')
+                for option in options:
+                    label = option.find_element(By.XPATH, 'following-sibling::label')
+                    label_text = label.text.lower()
+                    if "require sponsorship" in legend_text.lower() and 'no' in label_text:
+                        label.click()
+                        print("Selected 'No' for sponsorship requirement")
+                        break
+                    elif "require sponsorship" not in legend_text.lower() and 'yes' in label_text:
+                        label.click()
+                        print("Selected 'Yes'")
+                        break
         except Exception as e:
             print(f"Failed to process radio buttons: {e}")
-
-    def _select_radio_button(self, fieldset, legend_text):
-        options = fieldset.find_elements(By.XPATH, './/input[@type="radio"]')
-        for option in options:
-            label = option.find_element(By.XPATH, 'following-sibling::label')
-            label_text = label.text.lower()
-            if "require sponsorship" in legend_text.lower() and 'no' in label_text:
-                label.click()
-                print("Selected 'No' for sponsorship requirement")
-                break
-            elif "require sponsorship" not in legend_text.lower() and 'yes' in label_text:
-                label.click()
-                print("Selected 'Yes'")
-                break
 
     def process_label(self, label):
         input_id = label.get_attribute('for')
@@ -119,35 +122,41 @@ class LinkedInJobApplier:
             print(f"An error occurred while handling additional questions: {e}")
 
     def click_buttons(self):
-        self._click_button("//button[contains(@aria-label, 'Continue')]")
-        self._click_button("//button[contains(@aria-label, 'Review')]", handle_additional=True)
-        self._click_button("//button[contains(@aria-label, 'Submit application')]", dismiss_after=True)
+        while True:
+            try:
+                next_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Continue')]")
+                next_button.click()
+                time.sleep(1)
+            except TimeoutException:
+                break
 
-    def _click_button(self, xpath, handle_additional=False, dismiss_after=False):
         try:
-            button = self.wait_for_clickable(By.XPATH, xpath)
-            if handle_additional:
-                self.handle_additional_questions()
-            button.click()
+            review_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Review')]")
+            self.handle_additional_questions()
+            review_button.click()
             time.sleep(1)
-            if dismiss_after:
-                self._dismiss_application()
         except TimeoutException:
-            print(f"TimeoutException: The button {xpath} was not found in the given time.")
+            pass
 
-    def _dismiss_application(self):
         try:
+            submit_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Submit application')]")
+            submit_button.click()
+            print("Submitted the application.")
+            time.sleep(1)
             dismiss_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Dismiss')]")
             dismiss_button.click()
         except TimeoutException:
-            print("TimeoutException: The dismiss button was not found in the given time.")
+            print("TimeoutException: The submit button was not found in the given time.")
+        except StaleElementReferenceException:
+            print("StaleElementReferenceException: The element is no longer attached to the DOM.")
 
     def check_for_feedback_and_dismiss(self):
         try:
             feedback_message = self.driver.find_element(By.XPATH, "//span[@class='artdeco-inline-feedback__message']")
             if "Enter a decimal number larger than 0.0" in feedback_message.text:
-                self._dismiss_application()
-                discard_button = self.wait_for_clickable(By.XPATH, "//button[@data-control-name='discard_application_confirm_btn']")
+                dismiss_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Dismiss')]")
+                dismiss_button.click()
+                discard_button = self.wait_for_clickable(By.XPATH, "//button[contains(@aria-label, 'Discard')]")
                 discard_button.click()
         except TimeoutException:
             print("No feedback message found.")
@@ -177,19 +186,14 @@ class LinkedInJobApplier:
     def apply_to_jobs(self):
         while True:
             try:
-                job_list = self.wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "jobs-search"
-                                                                                               "-results__list-item")))
+                job_list = self.wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "jobs-search-results__list-item")))
                 for job in job_list:
                     self.apply_to_job(job)
             except StaleElementReferenceException:
                 continue
 
     def login(self):
-        self.driver.get(
-            'https://www.linkedin.com/jobs/search/?currentJobId=3954175374&distance=25&f_AL=true&f_E=2%2C3%2C4&f_TPR'
-            '=r86400&f_WT=1%2C3%2C2&geoId=101174742&keywords=software%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER'
-            '&refresh=true'
-        )
+        self.driver.get('https://www.linkedin.com/jobs/search/?currentJobId=3954175374&distance=25&f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&f_WT=1%2C3%2C2&geoId=101174742&keywords=software%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true')
         sign_in_button = self.wait_for_clickable(By.CLASS_NAME, "nav__button-secondary")
         sign_in_button.click()
         email = self.wait_for_element(By.ID, "username")
